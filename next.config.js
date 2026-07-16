@@ -22,6 +22,17 @@ const nextConfig = {
   async headers() {
     const isDev = process.env.NODE_ENV !== "production";
 
+    // Documents are uploaded straight from the browser to S3 with a presigned
+    // PUT (that's what keeps us under Vercel's request-body limit). The browser
+    // therefore opens a connection to the bucket's own origin, so it MUST be in
+    // connect-src — with only 'self', every drag & drop upload dies as
+    // "TypeError: Failed to fetch" before the request ever leaves the page.
+    // Derived from env so each environment allows exactly its own bucket.
+    const s3Origin =
+      process.env.S3_BUCKET && (process.env.S3_REGION || process.env.AWS_REGION)
+        ? `https://${process.env.S3_BUCKET}.s3.${process.env.S3_REGION || process.env.AWS_REGION}.amazonaws.com`
+        : "";
+
     // Content-Security-Policy tuned for Next.js + Framer Motion. The App Router
     // ships inline bootstrap/hydration scripts, so 'unsafe-inline' is required.
     // In DEVELOPMENT, Next compiles client modules via eval() and serves HMR
@@ -30,9 +41,13 @@ const nextConfig = {
     const scriptSrc = isDev
       ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
       : "script-src 'self' 'unsafe-inline'";
-    const connectSrc = isDev
-      ? "connect-src 'self' ws: wss:"
-      : "connect-src 'self'";
+    const connectSrc = [
+      "connect-src 'self'",
+      s3Origin,
+      ...(isDev ? ["ws:", "wss:"] : []),
+    ]
+      .filter(Boolean)
+      .join(" ");
 
     const directives = [
       "default-src 'self'",

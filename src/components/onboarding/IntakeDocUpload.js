@@ -169,7 +169,7 @@ export default function IntakeDocUpload({
               {!dragging && <> or <span className="text-copper-700 underline decoration-copper/40">Browse</span></>}
             </span>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-              PDF, JPG, PNG · up to 25 MB
+              PDF, Word, Excel, CSV, PNG, JPG · any file, up to 25 MB
             </span>
           </>
         )}
