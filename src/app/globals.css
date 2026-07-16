@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+/* ── Security guard (see components/SecurityGuard.js) ──
+   When the guard is active, page content cannot be selected/copied out, but
+   editable fields keep normal selection so paste and in-field copy still work. */
+:root[data-guard="on"] body {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none; /* disables the iOS long-press copy callout */
+}
+:root[data-guard="on"] input,
+:root[data-guard="on"] textarea,
+:root[data-guard="on"] select,
+:root[data-guard="on"] [contenteditable="true"] {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+/* Never let images be dragged out as a copy path. */
+:root[data-guard="on"] img {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+html,
+body {
+  background: #ffffff;
+  color: #0a0a0a;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* iOS Safari inflates font sizes when a phone is rotated to landscape unless
+     this is pinned. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Kills the grey flash Safari/Chrome on Android paint over a tapped element;
+   every interactive element here has its own hover/active styling. */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Full viewport height that survives mobile browser chrome.
+   100vh on iOS Safari counts the URL bar as visible space, so a centred layout
+   sized to 100vh is taller than the screen and gets pushed under the toolbar.
+   dvh tracks the *dynamic* viewport. The plain vh line stays first as a
+   fallback for browsers that don't know dvh (Safari < 15.4). */
+.min-h-dvh {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Scrollable body of a tall modal. Same dvh reasoning as .min-h-dvh: sized
+   against 100vh, a modal on iOS Safari runs past the bottom of the screen and
+   its footer buttons end up unreachable behind the toolbar. */
+.max-h-modal-body {
+  max-height: 62vh;
+  max-height: 62dvh;
+}
+
+/* Force a clean, pure-white light experience regardless of OS dark mode. */
+@media (prefers-color-scheme: dark) {
+  html,
+  body {
+    background: #ffffff;
+    color: #0a0a0a;
+  }
+}
+
+::selection {
+  background: rgba(207, 148, 85, 0.25);
+  color: #0b1f3a;
+}
+
+/* Refined focus ring */
+*:focus-visible {
+  outline: 2px solid #cf9455;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d7dded;
+  border-radius: 8px;
+  border: 2px solid #ffffff;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c2cadd;
+}
+
+@layer components {
+  /* border-line (#E4E8F0) is a divider tone — on a white card it left inputs
+     reading as flat white space with no visible edge. Inputs need a stronger
+     border than dividers do to look like something you can type into. The inset
+     shadow gives them a recessed, substantial feel rather than flat boxes. */
+  .input-base {
+    @apply w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-[15px] font-semibold text-ink
+           placeholder:font-normal placeholder:text-slate-400 transition-all duration-200
+           hover:border-navy/50
+           focus:border-copper outline-none;
+    /* A crisp outer hairline + soft lift gives every field a clearly defined,
+       substantial edge on the light background rather than a flat white box. */
+    box-shadow: 0 0 0 1px rgba(11, 31, 58, 0.02), 0 1px 2px rgba(11, 31, 58, 0.05);
+    /* Safari (iOS + macOS) styles form controls natively otherwise, which
+       overrides the border and radius above — date inputs are the worst
+       offenders. */
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .input-base:hover {
+    box-shadow: 0 2px 8px -2px rgba(11, 31, 58, 0.12);
+  }
+  .input-base:focus {
+    box-shadow: 0 0 0 4px rgba(207, 148, 85, 0.2), 0 1px 2px rgba(11, 31, 58, 0.05);
+  }
+
+  /* Enterprise micro-label — clearly reads as a field label above each input. */
+  .field-label {
+    @apply mb-1.5 block text-[12px] font-extrabold tracking-wide text-navy;
+  }
+
+  /* Faint engineering grid — an AI/tech texture for panel backgrounds. */
+  .tech-grid {
+    background-image: linear-gradient(rgba(11, 31, 58, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(11, 31, 58, 0.035) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  /* iOS Safari zooms the whole page in when a focused input's font-size is
+     below 16px, and never zooms back out. 15px is the design size, so raise it
+     to 16px on touch devices only — this keys off pointer type rather than
+     width so it also covers iPad and Android tablets, which are wide enough to
+     miss a `sm:` breakpoint but still auto-zoom. */
+  @media (pointer: coarse) {
+    .input-base {
+      font-size: 16px;
+    }
+  }
+
+  .card {
+    @apply rounded-xl2 border border-line bg-white shadow-elev;
+  }
+
+  .status-pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold;
+  }
+}
