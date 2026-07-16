@@ -1,6 +1,7 @@
 import { requireApi, json } from "@/lib/auth.js";
 import { query } from "@/lib/db.js";
-import { checklistDocKey, presignPutUrl, headObject } from "@/lib/s3.js";
+import { checklistDocKey, checklistPrefix, presignPutUrl, headObject, ensureFolder } from "@/lib/s3.js";
+import { loadDraft } from "@/lib/onboarding.js";
 import { getChecklistItemContext, attachChecklistDocument } from "@/lib/requests.js";
 
 export const runtime = "nodejs";
@@ -12,7 +13,12 @@ async function ctxFor(itemId) {
   const ctx = await getChecklistItemContext(itemId);
   if (!ctx) return null;
   const [c] = await query("SELECT client_code FROM clients WHERE id = :id LIMIT 1", { id: ctx.client_id });
-  return c ? { ...ctx, client_code: c.client_code } : null;
+  if (!c) return null;
+  // The facility name (from the client's draft) determines the facility folder
+  // the checklist documents are filed under — same folder as onboarding docs.
+  const draft = await loadDraft(ctx.client_id);
+  const facilityName = draft?.data?.facility?.facilityName || c.client_code;
+  return { ...ctx, client_code: c.client_code, facilityName };
 }
 
 // POST — presign an admin document upload (a file the client may then download).
@@ -34,9 +40,13 @@ export async function POST(req, { params }) {
   const ctx = await ctxFor(itemId);
   if (!ctx) return json({ error: "Checklist item not found." }, 404);
 
+  // Make sure the facility's checklist folder exists before the file lands.
+  await ensureFolder(checklistPrefix(ctx.client_id, ctx.client_code, ctx.facilityName));
+
   const key = checklistDocKey({
     clientId: ctx.client_id,
     clientCode: ctx.client_code,
+    facilityName: ctx.facilityName,
     requestId: ctx.request_id,
     source: "admin",
     filename: String(body?.filename || "file"),

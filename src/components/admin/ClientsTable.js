@@ -1,7 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
+import { api } from "@/lib/api";
 import { ONBOARDING_STATUS, SOW_OPTIONS, SYSTEM_ACCESS_OPTIONS, labelsFor } from "@/lib/domain";
 import ClientDetailPanel from "./ClientDetailPanel";
 import EditClientModal from "./EditClientModal";
@@ -27,6 +28,17 @@ export default function ClientsTable({ clients }) {
   const router = useRouter();
   const [viewing, setViewing] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [isMaster, setIsMaster] = useState(false);
+
+  // Only the master admin may permanently delete a client (DB + S3 wipe). The
+  // Edit modal's danger zone is gated on this.
+  useEffect(() => {
+    let alive = true;
+    api("/api/auth/me")
+      .then((me) => alive && setIsMaster(!!me.user?.is_master))
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // On save the API returns the freshly-shaped client. Update the open detail
   // panel in place so the change shows immediately, and refresh the server
@@ -143,6 +155,12 @@ export default function ClientsTable({ clients }) {
         // Adding/removing users must refresh the row's user count without
         // closing the modal the admin is still working in.
         onUsersChanged={() => router.refresh()}
+        isMaster={isMaster}
+        onDeleted={() => {
+          setEditing(null);
+          setViewing(null);
+          router.refresh();
+        }}
       />
     </>
   );

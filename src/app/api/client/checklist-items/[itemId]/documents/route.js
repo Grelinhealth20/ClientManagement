@@ -1,6 +1,7 @@
 import { requireClientApi, json } from "@/lib/auth.js";
 import { query } from "@/lib/db.js";
-import { checklistDocKey, presignPutUrl, headObject } from "@/lib/s3.js";
+import { checklistDocKey, checklistPrefix, presignPutUrl, headObject, ensureFolder } from "@/lib/s3.js";
+import { loadDraft } from "@/lib/onboarding.js";
 import { getChecklistItemContext, attachChecklistDocument } from "@/lib/requests.js";
 
 export const runtime = "nodejs";
@@ -13,7 +14,10 @@ async function ownedItem(itemId, clientId) {
   if (!ctx || ctx.client_id !== clientId) return null;
   if (!ctx.allow_upload) return { blocked: true };
   const [c] = await query("SELECT client_code FROM clients WHERE id = :id LIMIT 1", { id: clientId });
-  return { ...ctx, client_code: c?.client_code };
+  if (!c) return null;
+  const draft = await loadDraft(clientId);
+  const facilityName = draft?.data?.facility?.facilityName || c.client_code;
+  return { ...ctx, client_code: c.client_code, facilityName };
 }
 
 // POST — presign a client document upload against an upload-enabled item.
@@ -36,9 +40,13 @@ export async function POST(req, { params }) {
   if (!item) return json({ error: "Item not found." }, 404);
   if (item.blocked) return json({ error: "Uploads are not enabled for this item." }, 403);
 
+  // Make sure the facility's checklist folder exists before the file lands.
+  await ensureFolder(checklistPrefix(guard.clientId, item.client_code, item.facilityName));
+
   const key = checklistDocKey({
     clientId: guard.clientId,
     clientCode: item.client_code,
+    facilityName: item.facilityName,
     requestId: item.request_id,
     source: "client",
     filename: String(body?.filename || "file"),

@@ -8,7 +8,21 @@ import { Input, Textarea } from "@/components/ui/Field";
 import { Panel, CountChip, StatusBadge, Icons } from "@/components/requests/ui";
 import { CHECKLIST_STATUS, fmtDateTime } from "@/lib/requestsDomain";
 
-const blankItem = () => ({ content: "", allow_upload: true, allow_download: false });
+const blankItem = () => ({ content: "", allow_upload: true, allow_download: false, file: null });
+
+/** Upload one File to a saved checklist item (presign → S3 PUT → confirm). */
+async function uploadFileToItem(itemId, file) {
+  const p = await api(`/api/admin/checklist-items/${itemId}/documents`, {
+    method: "POST",
+    body: { filename: file.name, content_type: file.type, size: file.size },
+  });
+  const put = await fetch(p.url, { method: "PUT", headers: p.headers, body: file });
+  if (!put.ok) throw new Error("Upload to storage failed.");
+  await api(`/api/admin/checklist-items/${itemId}/documents`, {
+    method: "PUT",
+    body: { key: p.key, filename: file.name, content_type: file.type },
+  });
+}
 
 /**
  * Checklist Builder — a super admin composes a request (title + message + items)
@@ -38,10 +52,28 @@ export default function ChecklistBuilder({ clientId, checklists, onChanged }) {
     if (!clean.length) return toast.error("Add at least one checklist item.");
     setSaving(true);
     try {
-      await api(`/api/admin/clients/${clientId}/checklists`, {
+      const res = await api(`/api/admin/clients/${clientId}/checklists`, {
         method: "POST",
-        body: { title, message, items: clean },
+        body: { title, message, items: clean.map(({ file, ...rest }) => rest) },
       });
+
+      // Upload any download-grant files the admin attached in the builder. The
+      // server inserts items in the same order we sent them, so we match the
+      // saved item ids back to our list by position.
+      const toUpload = clean.map((c, i) => ({ c, i })).filter(({ c }) => c.allow_download && c.file);
+      if (toUpload.length && res?.id) {
+        const list = await api(`/api/admin/clients/${clientId}/checklists`);
+        const saved = (list.checklists || []).find((x) => x.id === res.id);
+        const savedItems = saved?.items || [];
+        for (const { c, i } of toUpload) {
+          const itemId = savedItems[i]?.id;
+          if (itemId) {
+            try { await uploadFileToItem(itemId, c.file); }
+            catch (e) { toast.error(`Attachment for item ${i + 1}: ${e.message}`); }
+          }
+        }
+      }
+
       toast.success("Checklist request sent to the client.");
       reset();
       onChanged();
@@ -109,9 +141,17 @@ export default function ChecklistBuilder({ clientId, checklists, onChanged }) {
                             label="Allow download"
                             hint="Attach a file for the client to download"
                             on={it.allow_download}
-                            onClick={() => setItems((arr) => arr.map((x, j) => (j === i ? { ...x, allow_download: !x.allow_download } : x)))}
+                            onClick={() => setItems((arr) => arr.map((x, j) => (j === i ? { ...x, allow_download: !x.allow_download, file: x.allow_download ? null : x.file } : x)))}
                           />
                         </div>
+
+                        {/* Drag & drop the file the client will download */}
+                        {it.allow_download && (
+                          <BuilderDrop
+                            file={it.file}
+                            onFile={(f) => setItems((arr) => arr.map((x, j) => (j === i ? { ...x, file: f } : x)))}
+                          />
+                        )}
                       </div>
                       {items.length > 1 && (
                         <button onClick={() => setItems((arr) => arr.filter((_, j) => j !== i))} className="mt-1 rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Remove item">
@@ -162,6 +202,39 @@ export default function ChecklistBuilder({ clientId, checklists, onChanged }) {
         </div>
       )}
     </Panel>
+  );
+}
+
+/** Builder-time drag & drop that holds the chosen file locally until the
+ *  checklist is created, then it's uploaded and offered to the client. */
+function BuilderDrop({ file, onFile }) {
+  const inputRef = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  return (
+    <div className="mt-2.5">
+      {file ? (
+        <div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-violet-600"><path d="M14 3v5h5M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" strokeLinejoin="round" /></svg>
+          <span className="min-w-0 flex-1 truncate text-[12px] font-bold text-navy">{file.name}</span>
+          <button type="button" onClick={() => onFile(null)} className="text-violet-400 hover:text-rose-600" title="Remove file">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" /></svg>
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files?.[0]) onFile(e.dataTransfer.files[0]); }}
+          className={`flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-3 text-center transition-all ${dragging ? "scale-[1.01] border-violet-500 bg-violet-100" : "border-violet-300 bg-violet-50/60 hover:border-violet-400 hover:bg-violet-50"}`}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-violet-600"><path d="M12 15V4M8 8l4-4 4 4" strokeLinecap="round" strokeLinejoin="round" /><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          <span className="text-[12px] font-bold text-navy">{dragging ? "Release to attach" : "Drag & drop a file for the client to download, or "}<span className="text-violet-700 underline decoration-violet-400">browse</span></span>
+        </button>
+      )}
+      <input ref={inputRef} type="file" className="hidden" onChange={(e) => { if (e.target.files?.[0]) onFile(e.target.files[0]); e.target.value = ""; }} />
+    </div>
   );
 }
 
@@ -249,6 +322,7 @@ function ItemRow({ item, onChanged }) {
   const toast = useToast();
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const adminDocs = item.documents.filter((d) => d.source === "admin");
   const clientDocs = item.documents.filter((d) => d.source === "client");
 
@@ -309,18 +383,36 @@ function ItemRow({ item, onChanged }) {
             {item.allow_download && <Tag tone="violet">Download grant</Tag>}
           </div>
 
-          {/* Admin download-grant files */}
+          {/* Admin download-grant: drag & drop a file for the client to download */}
           {item.allow_download && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              {adminDocs.map((d) => (
-                <span key={d.id} className="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] font-bold text-violet-700">
-                  <button onClick={() => view(d, true)} className="max-w-[160px] truncate hover:underline">{d.filename}</button>
-                  <button onClick={() => removeAdminDoc(d)} className="text-violet-400 hover:text-rose-600" title="Remove"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" /></svg></button>
-                </span>
-              ))}
-              <button onClick={() => inputRef.current?.click()} disabled={busy} className="inline-flex items-center gap-1 rounded-lg border border-dashed border-violet-300 px-2 py-1 text-[11px] font-bold text-violet-700 hover:bg-violet-50 disabled:opacity-50">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 15V4M8 8l4-4 4 4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                {busy ? "Uploading…" : "Attach file"}
+            <div className="mt-2">
+              {adminDocs.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {adminDocs.map((d) => (
+                    <span key={d.id} className="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] font-bold text-violet-700">
+                      <button onClick={() => view(d, true)} className="max-w-[160px] truncate hover:underline">{d.filename}</button>
+                      <button onClick={() => removeAdminDoc(d)} className="text-violet-400 hover:text-rose-600" title="Remove"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" /></svg></button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(e) => { e.preventDefault(); setDragging(false); uploadAdmin(e.dataTransfer.files); }}
+                disabled={busy}
+                className={`flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-3 text-center transition-all disabled:opacity-60 ${dragging ? "scale-[1.01] border-violet-500 bg-violet-100" : "border-violet-300 bg-violet-50/60 hover:border-violet-400 hover:bg-violet-50"}`}
+              >
+                {busy ? (
+                  <span className="flex items-center gap-2 text-[12px] font-bold text-violet-700"><Spin /> Uploading…</span>
+                ) : (
+                  <>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-violet-600"><path d="M12 15V4M8 8l4-4 4 4" strokeLinecap="round" strokeLinejoin="round" /><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    <span className="text-[12px] font-bold text-navy">{dragging ? "Release to attach" : "Drag & drop a file for the client to download, or "}<span className="text-violet-700 underline decoration-violet-400">browse</span></span>
+                  </>
+                )}
               </button>
               <input ref={inputRef} type="file" className="hidden" onChange={(e) => uploadAdmin(e.target.files)} />
             </div>
@@ -347,4 +439,13 @@ function ItemRow({ item, onChanged }) {
 function Tag({ tone, children }) {
   const cls = tone === "sky" ? "bg-sky-100 text-sky-700" : "bg-violet-100 text-violet-700";
   return <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${cls}`}>{children}</span>;
+}
+
+function Spin() {
+  return (
+    <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
+    </svg>
+  );
 }

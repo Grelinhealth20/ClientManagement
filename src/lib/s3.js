@@ -122,16 +122,22 @@ export function buildDocumentKey({
   return `${base}/documents/${cat}/${unique}-${safeFilename(filename)}`;
 }
 
+/** The folder that holds all of a client's checklist documents, nested inside
+ *  that client's facility folder so it lives alongside the onboarding docs. */
+export function checklistPrefix(clientId, clientCode, facilityName) {
+  return `${facilityPrefix(clientId, clientCode, facilityName)}/checklists`;
+}
+
 /**
- * Object key for a checklist document. Kept under the client's isolation prefix
- * and namespaced by request id + source ('admin' download-grant, or 'client'
- * submission) so nothing collides and tenant isolation holds.
+ * Object key for a checklist document — nested under the client's FACILITY
+ * folder (so it sits with the rest of that facility's documents), then by
+ * request id + source ('admin' download-grant, or 'client' submission) so
+ * nothing collides and tenant isolation holds.
  */
-export function checklistDocKey({ clientId, clientCode, requestId, source, filename }) {
-  const seg = clientSegment(clientId, clientCode);
+export function checklistDocKey({ clientId, clientCode, facilityName, requestId, source, filename }) {
   const src = source === "admin" ? "admin" : "client";
   const unique = crypto.randomBytes(6).toString("hex");
-  return `clients/${seg}/checklists/${requestId}/${src}/${unique}-${safeFilename(filename)}`;
+  return `${checklistPrefix(clientId, clientCode, facilityName)}/${requestId}/${src}/${unique}-${safeFilename(filename)}`;
 }
 
 export async function putObject({ key, body, contentType }) {
