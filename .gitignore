@@ -9,8 +9,8 @@
 # production
 /build
 
-# env — .env is committed intentionally for this project.
-# (Rotate JWT_SECRET / ENCRYPTION_KEY / DB_PASSWORD before any public release.)
+# env — never commit real secrets
+.env
 .env*.local
 
 # misc
